@@ -13,15 +13,21 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  setup:
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
+
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: false
+          dotnet: false
+          haskell: false
+          large-packages: false
+          docker-images: false
+          swap-storage: false
 
       # Cache the downloaded slob file
       - name: Cache slob file
@@ -38,6 +44,29 @@ jobs:
         if: steps.cache-slob.outputs.cache-hit != 'true'
         run: wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki20250201-slob/zhwiki-20250201.slob
 
+      # Upload slob file as artifact for other jobs to use
+      - name: Upload slob file
+        uses: actions/upload-artifact@v4
+        with:
+          name: slob-file
+          path: zhwiki-20250201.slob
+          retention-days: 1
+
+  generate:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        format: [ifo, xml, tab]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download the slob file
+      - name: Download slob file
+        uses: actions/download-artifact@v4
+        with:
+          name: slob-file
+
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -51,7 +80,7 @@ jobs:
           path: |
             .venv
             ~/.cache/uv
-          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}-${{ matrix.format }}
           restore-keys: |
             ${{ runner.os }}-venv-
 
@@ -68,24 +97,15 @@ jobs:
           fi
           uv pip install pyglossary PyICU lxml prompt_toolkit
           mkdir -p output
-      
-      - name: run ifo
-        run: |
-          source .venv/bin/activate
-          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.ifo
-      
-      - name: run xml
-        run: |
-          source .venv/bin/activate
-          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.xml
 
-      - name: run tab
+      - name: run ${{ matrix.format }}
         run: |
           source .venv/bin/activate
-          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.tab
+          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.${{ matrix.format }}
 
-      - name: Upload to Artifacts      
-        uses: actions/upload-artifact@main
+      - name: Upload ${{ matrix.format }} output
+        uses: actions/upload-artifact@v4
         with:
-          name: output
-          path: output
+          name: output-${{ matrix.format }}
+          path: output/zhwiki-20250201.${{ matrix.format }}
+          retention-days: 90
