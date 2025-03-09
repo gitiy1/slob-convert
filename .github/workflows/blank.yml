@@ -89,7 +89,7 @@ jobs:
           # 使用更简单的缓存键
           key: slob-file-${{ github.event.inputs.versioncode }}
           restore-keys: |
-            slob-file-
+            slob-file-${{ github.event.inputs.versioncode }}
 
       # Only download if not cached
       - name: wget
