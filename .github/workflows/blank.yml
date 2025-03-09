@@ -15,7 +15,7 @@ jobs:
   Convert:
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: "3.11"  # 明确指定 Python 版本
+      PYTHON_VERSION: "3.12.3"  # 明确指定 Python 版本
       
     steps:
       - uses: actions/checkout@v4
