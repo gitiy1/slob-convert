@@ -15,7 +15,7 @@ jobs:
   Convert:
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: "3.12.3"  # 明确指定 Python 版本
+      PYTHON_VERSION: "3.12"  # 明确指定 Python 版本
       
     steps:
       - uses: actions/checkout@v4
@@ -55,25 +55,16 @@ jobs:
       # 创建和解析依赖文件
       - name: Create and resolve dependencies
         run: |
-          # 创建 pyproject.toml
-          cat > pyproject.toml << EOL
-          [project]
-          name = "wiki-converter"
-          version = "1.0.0"
-          dependencies = [
-              "pyglossary",
-              "PyICU",
-              "lxml",
-              "prompt_toolkit",
-          ]
-
-          [build-system]
-          requires = ["hatchling"]
-          build-backend = "hatchling.build"
+          # 创建依赖文件
+          cat > requirements.in << EOL
+          pyglossary
+          PyICU
+          lxml
+          prompt_toolkit
           EOL
 
           # 使用 uv pip compile 生成精确的依赖版本
-          uv pip compile pyproject.toml --output-file requirements.lock
+          uv pip compile requirements.in --output-file requirements.lock
           cat requirements.lock
 
       # 改进的 Python 虚拟环境缓存
@@ -101,7 +92,7 @@ jobs:
           
           # 使用锁定文件安装依赖
           echo "Installing Python packages from lock file..."
-          uv pip install -r requirements.lock --no-deps
+          uv pip install -r requirements.lock
           
           # 验证安装的包
           uv pip freeze > installed.txt
