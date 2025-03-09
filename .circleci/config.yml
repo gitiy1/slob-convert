@@ -1,0 +1,107 @@
+version: 2.1
+
+executors:
+  default:
+    machine:
+      image: ubuntu-2204:edge
+      docker_layer_caching: true 
+    resource_class: large
+    # resource_class: arm.large
+    working_directory: ~/project
+
+jobs:
+  build:
+    executor: default
+    environment:
+      VERSION_CODE: 250201
+      TZ: Asia/Shanghai
+
+    steps:
+      - checkout
+
+      - run:
+          name: Check space usage
+          command: df -hT
+
+      - run:
+          name: Free disk space (Ubuntu)
+          command: |
+            sudo apt-get clean
+            sudo rm -rf /var/lib/apt/lists/*
+            sudo apt-get autoremove -y
+
+      - run:
+          name: Check space usage
+          command: df -hT
+ 
+      - run:
+          name: Initialization environment
+          command: |
+            sudo apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive sudo apt install pkg-config libicu-dev -y
+            sudo apt-get autoremove --purge -qq
+            sudo apt-get clean -qq
+            sudo timedatectl set-timezone ${TZ}
+            sudo mkdir -p /workdir
+            sudo chown $USER:$USER /workdir
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - run:
+          name: Create and resolve dependencies
+          command: |
+            # 创建依赖文件
+            cat > requirements.in << EOL
+            pyglossary
+            PyICU
+            lxml
+            prompt_toolkit
+            EOL
+
+            # 使用 uv pip compile 生成精确的依赖版本
+            uv pip compile requirements.in --output-file requirements.lock
+            cat requirements.lock
+            uv venv
+
+      - run:
+          name: Setup Python Environment
+          command: |
+            if [ ! -d ".venv" ]; then
+            echo "Creating new virtual environment..."
+            uv venv
+            fi
+            source .venv/bin/activate
+          
+            # 使用锁定文件安装依赖
+            echo "Installing Python packages from lock file..."
+            uv pip install -r requirements.lock
+          
+            # 验证安装的包
+            uv pip freeze > installed.txt
+          
+            mkdir -p output
+
+      - run:
+          name: Download SLOB file
+          command: |
+            wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki${VERSION_CODE}-slob/zhwiki-20250201.slob -O zhwiki-${VERSION_CODE}.slob
+
+      - run:
+          name: Convert IFO
+          command: |
+            source .venv/bin/activate
+            uv run pyglossary --no-interactive zhwiki-${VERSION_CODE}.slob output/zhwiki-${VERSION_CODE}.ifo
+
+      - run:
+          name: Check space usage
+          command: df -hT
+
+
+      - store_artifacts:
+          path: output/zhwiki-${VERSION_CODE}.ifo
+          destination: zhwiki-${VERSION_CODE}.ifo
+
+workflows:
+  version: 2
+  build_and_test:
+    jobs:
+      - build
