@@ -1,0 +1,61 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v4
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      # Runs a single command using the runners shell
+      - name: wget
+        run: wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki20250201-slob/zhwiki-20250201.slob
+      
+      - name: install
+        run: |
+          uv venv
+          source .venv/bin/activate
+          apt-get  install -y pkg-config libicu-dev
+          uv pip install pyglossary PyICU lxml prompt_toolkit
+          mkdir -p output
+      
+      - name: run ifo
+        run: |
+          source .venv/bin/activate
+          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.ifo
+      
+      - name: run xml
+        run: |
+          source .venv/bin/activate
+          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.xml
+
+      - name: run tab
+        run: |
+          source .venv/bin/activate
+          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.tab
+
+      - name: Upload to Artifacts      
+        uses: actions/upload-artifact@main
+        with:
+          name: output
+          path: output
