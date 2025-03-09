@@ -24,9 +24,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: zhwiki-20250201.slob
-          key: ${{ runner.os }}-slob-20250201
+          # 使用更简单的缓存键
+          key: slob-file-20250201
           restore-keys: |
-            ${{ runner.os }}-slob-
+            slob-file-
 
       # Only download if not cached
       - name: wget
@@ -72,7 +73,7 @@ jobs:
         with:
           version: "latest"
 
-      # Cache Python virtual environment
+      # 改进的 Python 虚拟环境缓存
       - name: Cache Python virtual environment
         id: cache-venv
         uses: actions/cache@v4
@@ -80,22 +81,42 @@ jobs:
           path: |
             .venv
             ~/.cache/uv
-          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}-${{ matrix.format }}
+          # 使用固定依赖列表作为缓存键的一部分
+          key: ${{ runner.os }}-venv-${{ matrix.format }}-${{ hashFiles('.github/workflows/ci.yml') }}
           restore-keys: |
+            ${{ runner.os }}-venv-${{ matrix.format }}-
             ${{ runner.os }}-venv-
+
+      # 创建依赖清单文件
+      - name: Create package list
+        run: |
+          echo "pyglossary" > packages.txt
+          echo "PyICU" >> packages.txt
+          echo "lxml" >> packages.txt
+          echo "prompt_toolkit" >> packages.txt
 
       # Install system dependencies and Python packages if cache miss
       - name: install
         run: |
           if [ ! -d ".venv" ]; then
+            echo "Creating new virtual environment..."
             uv venv
           fi
           source .venv/bin/activate
+          
+          # 检查是否需要安装系统依赖
           if ! dpkg -l | grep -q "libicu-dev"; then
+            echo "Installing system dependencies..."
             sudo apt-get update
             sudo apt-get install -y pkg-config libicu-dev
           fi
-          uv pip install pyglossary PyICU lxml prompt_toolkit
+          
+          # 检查是否需要安装Python包
+          if ! pip list | grep -q "pyglossary"; then
+            echo "Installing Python packages..."
+            uv pip install -r packages.txt
+          fi
+          
           mkdir -p output
 
       - name: run ${{ matrix.format }}
