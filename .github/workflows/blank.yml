@@ -4,7 +4,6 @@ name: CI
 
 # Controls when the workflow will run
 on:
-
   workflow_dispatch:
     inputs:
       versioncode:
@@ -15,6 +14,9 @@ on:
 jobs:
   Convert:
     runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: "3.11"  # 明确指定 Python 版本
+      
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +36,46 @@ jobs:
         with:
           version: "latest"
 
+      # 系统依赖缓存标记
+      - name: Cache system dependencies
+        id: cache-system-deps
+        uses: actions/cache@v4
+        with:
+          path: .system-deps-installed
+          key: ${{ runner.os }}-system-deps-v2-${{ env.PYTHON_VERSION }}
+
+      # 安装系统依赖（如果未缓存）
+      - name: Install system dependencies
+        if: steps.cache-system-deps.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libicu-dev
+          touch .system-deps-installed
+
+      # 创建和解析依赖文件
+      - name: Create and resolve dependencies
+        run: |
+          # 创建 pyproject.toml
+          cat > pyproject.toml << EOL
+          [project]
+          name = "wiki-converter"
+          version = "1.0.0"
+          dependencies = [
+              "pyglossary",
+              "PyICU",
+              "lxml",
+              "prompt_toolkit",
+          ]
+
+          [build-system]
+          requires = ["hatchling"]
+          build-backend = "hatchling.build"
+          EOL
+
+          # 使用 uv pip compile 生成精确的依赖版本
+          uv pip compile pyproject.toml --output-file requirements.lock
+          cat requirements.lock
+
       # 改进的 Python 虚拟环境缓存
       - name: Cache Python virtual environment
         id: cache-venv
@@ -42,22 +84,14 @@ jobs:
           path: |
             .venv
             ~/.cache/uv
-          # 使用固定依赖列表作为缓存键的一部分
-          key: ${{ runner.os }}-venv-ifo-${{ hashFiles('.github/workflows/ci.yml') }}
+          # 使用锁定文件的哈希值作为缓存键
+          key: ${{ runner.os }}-venv-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.lock') }}
           restore-keys: |
-            ${{ runner.os }}-venv-ifo
+            ${{ runner.os }}-venv-${{ env.PYTHON_VERSION }}-
             ${{ runner.os }}-venv-
 
-      # 创建依赖清单文件
-      - name: Create package list
-        run: |
-          echo "pyglossary" > packages.txt
-          echo "PyICU" >> packages.txt
-          echo "lxml" >> packages.txt
-          echo "prompt_toolkit" >> packages.txt
-
-      # Install system dependencies and Python packages if cache miss
-      - name: install
+      # Install Python packages if cache miss
+      - name: Setup Python Environment
         run: |
           if [ ! -d ".venv" ]; then
             echo "Creating new virtual environment..."
@@ -65,36 +99,48 @@ jobs:
           fi
           source .venv/bin/activate
           
-          # 检查是否需要安装系统依赖
-          if ! dpkg -l | grep -q "libicu-dev"; then
-            echo "Installing system dependencies..."
-            sudo apt-get update
-            sudo apt-get install -y pkg-config libicu-dev
-          fi
+          # 使用锁定文件安装依赖
+          echo "Installing Python packages from lock file..."
+          uv pip install -r requirements.lock --no-deps
           
-          # 检查是否需要安装Python包
-          if ! pip list | grep -q "pyglossary"; then
-            echo "Installing Python packages..."
-            uv pip install -r packages.txt
+          # 验证安装的包
+          uv pip freeze > installed.txt
+          if ! cmp -s requirements.lock installed.txt; then
+            echo "Warning: Installed packages differ from lock file"
+            diff requirements.lock installed.txt || true
           fi
           
           mkdir -p output
 
-      # Cache the downloaded slob file
+      # Cache the downloaded slob file with validation
       - name: Cache slob file
         id: cache-slob
         uses: actions/cache@v4
         with:
-          path: zhwiki-${{ github.event.inputs.versioncode }}.slob
-          # 使用更简单的缓存键
-          key: slob-file-${{ github.event.inputs.versioncode }}
+          path: |
+            zhwiki-${{ github.event.inputs.versioncode }}.slob
+            .slob-checksum
+          key: slob-file-${{ github.event.inputs.versioncode }}-v2
           restore-keys: |
-            slob-file-${{ github.event.inputs.versioncode }}
+            slob-file-${{ github.event.inputs.versioncode }}-
 
-      # Only download if not cached
-      - name: wget
+      # Verify cached SLOB file
+      - name: Verify SLOB file
+        if: steps.cache-slob.outputs.cache-hit == 'true'
+        run: |
+          if [ ! -s "zhwiki-${{ github.event.inputs.versioncode }}.slob" ]; then
+            echo "Cached SLOB file is empty or corrupted"
+            rm -f "zhwiki-${{ github.event.inputs.versioncode }}.slob"
+            echo "::set-output name=cache-hit::false"
+          fi
+
+      # Only download if not cached or verification failed
+      - name: Download SLOB file
         if: steps.cache-slob.outputs.cache-hit != 'true'
-        run: wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki${{ github.event.inputs.versioncode }}-slob/zhwiki-20250201.slob
+        run: |
+          wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki${{ github.event.inputs.versioncode }}-slob/zhwiki-20250201.slob -O zhwiki-${{ github.event.inputs.versioncode }}.slob
+          # Create checksum file
+          sha256sum zhwiki-${{ github.event.inputs.versioncode }}.slob > .slob-checksum
 
       - name: Convert IFO
         run: |
@@ -104,6 +150,15 @@ jobs:
       - name: Upload IFO output
         uses: actions/upload-artifact@v4
         with:
-          name: output-${{ matrix.format }}
-          path: output/zhwiki-${{ github.event.inputs.versioncode }}.ifo
+          name: wiki-ifo-${{ github.event.inputs.versioncode }}
+          path: |
+            output/zhwiki-${{ github.event.inputs.versioncode }}.ifo
+            requirements.lock
           retention-days: 90
+
+      # Add workflow completion notification
+      - name: Notify completion
+        if: always()
+        run: |
+          echo "Workflow completed at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Status: ${{ job.status }}"
