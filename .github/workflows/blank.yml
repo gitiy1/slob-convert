@@ -4,12 +4,12 @@ name: CI
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
 
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      versioncode:
+        description: 'Version Code'
+        required: true
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -17,45 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # Cache the downloaded slob file
-      - name: Cache slob file
-        id: cache-slob
-        uses: actions/cache@v4
-        with:
-          path: zhwiki-20250201.slob
-          # 使用更简单的缓存键
-          key: slob-file-20250201
-          restore-keys: |
-            slob-file-
-
-      # Only download if not cached
-      - name: wget
-        if: steps.cache-slob.outputs.cache-hit != 'true'
-        run: wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki20250201-slob/zhwiki-20250201.slob
-
-      # Upload slob file as artifact for other jobs to use
-      - name: Upload slob file
-        uses: actions/upload-artifact@v4
-        with:
-          name: slob-file
-          path: zhwiki-20250201.slob
-          retention-days: 1
-
-  generate:
-    needs: setup
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        format: [ifo, xml, tab]
-    steps:
-      - uses: actions/checkout@v4
-
-      # Download the slob file
-      - name: Download slob file
-        uses: actions/download-artifact@v4
-        with:
-          name: slob-file
 
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main
@@ -82,9 +43,9 @@ jobs:
             .venv
             ~/.cache/uv
           # 使用固定依赖列表作为缓存键的一部分
-          key: ${{ runner.os }}-venv-${{ matrix.format }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          key: ${{ runner.os }}-venv-ifo-${{ hashFiles('.github/workflows/ci.yml') }}
           restore-keys: |
-            ${{ runner.os }}-venv-${{ matrix.format }}-
+            ${{ runner.os }}-venv-ifo
             ${{ runner.os }}-venv-
 
       # 创建依赖清单文件
@@ -119,14 +80,30 @@ jobs:
           
           mkdir -p output
 
-      - name: run ${{ matrix.format }}
+      # Cache the downloaded slob file
+      - name: Cache slob file
+        id: cache-slob
+        uses: actions/cache@v4
+        with:
+          path: zhwiki-${{ github.event.inputs.versioncode }}.slob
+          # 使用更简单的缓存键
+          key: slob-file-${{ github.event.inputs.versioncode }}
+          restore-keys: |
+            slob-file-
+
+      # Only download if not cached
+      - name: wget
+        if: steps.cache-slob.outputs.cache-hit != 'true'
+        run: wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki${{ github.event.inputs.versioncode }}-slob/zhwiki-20250201.slob
+
+      - name: Convert IFO
         run: |
           source .venv/bin/activate
-          uv run pyglossary --no-interactive zhwiki-20250201.slob output/zhwiki-20250201.${{ matrix.format }}
+          uv run pyglossary --no-interactive zhwiki-${{ github.event.inputs.versioncode }}.slob output/zhwiki-${{ github.event.inputs.versioncode }}.ifo
 
-      - name: Upload ${{ matrix.format }} output
+      - name: Upload IFO output
         uses: actions/upload-artifact@v4
         with:
           name: output-${{ matrix.format }}
-          path: output/zhwiki-20250201.${{ matrix.format }}
+          path: output/zhwiki-${{ github.event.inputs.versioncode }}.ifo
           retention-days: 90
