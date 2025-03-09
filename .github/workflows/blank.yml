@@ -22,20 +22,50 @@ jobs:
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
+
+      # Cache the downloaded slob file
+      - name: Cache slob file
+        id: cache-slob
+        uses: actions/cache@v4
+        with:
+          path: zhwiki-20250201.slob
+          key: ${{ runner.os }}-slob-20250201
+          restore-keys: |
+            ${{ runner.os }}-slob-
+
+      # Only download if not cached
+      - name: wget
+        if: steps.cache-slob.outputs.cache-hit != 'true'
+        run: wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki20250201-slob/zhwiki-20250201.slob
+
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
 
-      # Runs a single command using the runners shell
-      - name: wget
-        run: wget -c https://ftp.halifax.rwth-aachen.de/aarddict/zhwiki/zhwiki20250201-slob/zhwiki-20250201.slob
-      
+      # Cache Python virtual environment
+      - name: Cache Python virtual environment
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: |
+            .venv
+            ~/.cache/uv
+          key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-venv-
+
+      # Install system dependencies and Python packages if cache miss
       - name: install
         run: |
-          uv venv
+          if [ ! -d ".venv" ]; then
+            uv venv
+          fi
           source .venv/bin/activate
-          apt-get  install -y pkg-config libicu-dev
+          if ! dpkg -l | grep -q "libicu-dev"; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libicu-dev
+          fi
           uv pip install pyglossary PyICU lxml prompt_toolkit
           mkdir -p output
       
